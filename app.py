@@ -23,7 +23,7 @@ def db_last_modified() -> float:
 @reactive.poll(db_last_modified, 0.5)
 def df() -> pd.DataFrame:
     conn = sqlite3.connect("llm-data.db")
-    out = pd.read_sql_query("SELECT * FROM llm_data", conn)
+    out = pd.read_sql_query("SELECT * FROM reviews", conn)
     conn.close()
     return out
 
@@ -77,7 +77,6 @@ def server(input: Inputs, output: Outputs, session: Session):
     @reactive.Effect
     @reactive.event(input.skip)
     def skip() -> None:
-        enter_item(current_row(), decision="Skip")
         get_next_item()
 
     @reactive.Effect
@@ -111,6 +110,7 @@ def server(input: Inputs, output: Outputs, session: Session):
             "notes": notes,
             "decision": decision,
             "labels": "|".join(labels),
+            "reviewer": "Gordon",  # Replace with session.user()
         }
         write_to_db(current_row().at[0, "id"], to_write, conn)
 

@@ -25,20 +25,29 @@ def load_data_to_sqlite(data_path: Path, db_path: str = "llm-data.db") -> None:
             B TEXT,
             C TEXT,
             D TEXT,
-            E TEXT,
-            notes TEXT,
-            decision TEXT,
-            labels TEXT,
-            lock INTEGER
+            E TEXT
         )
         """
     )
+
+    c.execute(
+        """
+        CREATE TABLE reviews (
+            id INTEGER PRIMARY KEY,
+            decision TEXT,
+            notes TEXT,
+            labels TEXT,
+            reviewer TEXT
+        )
+        """
+    )
+
     df = pd.read_csv(data_path)
     for index, row in df.iterrows():
         c.execute(
             """
-            INSERT INTO llm_data (id, prompt, A, B, C, D, E, notes, decision, labels, lock)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', '', 0)
+            INSERT INTO llm_data (id, prompt, A, B, C, D, E)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 index,
@@ -48,7 +57,6 @@ def load_data_to_sqlite(data_path: Path, db_path: str = "llm-data.db") -> None:
                 row["C"],
                 row["D"],
                 row["E"],
-                row["notes"],
             ),
         )
     conn.commit()
@@ -65,8 +73,12 @@ def write_to_db(id: int, col_values_dict: dict, conn: sqlite3.Connection) -> Non
         conn: The SQLite connection object.
     """
     c = conn.cursor()
-    for key, value in col_values_dict.items():
-        c.execute(f"UPDATE llm_data SET {key} = '{value}' WHERE id = {id}")
+    values = tuple(col_values_dict.values())
+    placeholders = ",".join("?" * len(values))
+    c.execute(
+        f"INSERT INTO reviews ({','.join(col_values_dict.keys())}) VALUES ({placeholders})",
+        values,
+    )
     conn.commit()
 
 
@@ -75,9 +87,15 @@ def get_next_record(
 ) -> pd.DataFrame:
     """
     Get the next record from the SQLite database. This functions
-    first unlocks the currently selected record, then selects the next
-    record that is both unlocked and has no `decision` field, and finally
-    locks that row so that other users will not be able to access it.
+    takes a random record from the table which hasn't yet been reviewed.
+    This function allows the possibility of multiple reviews in the following scenario:
+    - User A selects record
+    - User B selects the same record before User A has completed their review
+    - User A completes review
+    - User B completes review
+
+    The benefit of this approach is that we don't have to worry about locking records,
+    or cleaning up the database when a session ends.
 
     Args:
         conn: The SQLite connection object.
@@ -88,28 +106,13 @@ def get_next_record(
     """
     c = conn.cursor()
 
-    if current_id is not None:
-        write_to_db(current_id, {"lock": "0"}, conn=conn)
-    columns = [
-        "id",
-        "prompt",
-        "A",
-        "B",
-        "C",
-        "D",
-        "E",
-        "notes",
-        "decision",
-        "labels",
-        "lock",
-    ]
+    columns = ["id", "prompt", "A", "B", "C", "D", "E"]
     c.execute(
-        f"SELECT {', '.join(columns)} FROM llm_data WHERE lock = 0 AND decision = '' LIMIT 1"
+        f"SELECT {', '.join(columns)} FROM llm_data WHERE id NOT IN (SELECT id FROM reviews) ORDER BY RANDOM() LIMIT 1"
     )
     result = c.fetchone()
     out = pd.DataFrame(
         [result],
         columns=columns,
     )
-    write_to_db(out.at[0, "id"], {"lock": "1"}, conn=conn)
     return out
