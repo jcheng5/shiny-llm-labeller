@@ -6,6 +6,13 @@ import os
 
 
 def load_data_to_sqlite(data_path: Path, db_path: str = "llm-data.db") -> None:
+    """
+    Load data from a CSV file into a SQLite database.
+
+    Args:
+        data_path: Path to the CSV file containing the data.
+        db_path: Path to the SQLite database file.
+    """
     os.unlink(db_path)
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
@@ -49,6 +56,14 @@ def load_data_to_sqlite(data_path: Path, db_path: str = "llm-data.db") -> None:
 
 
 def write_to_db(id: int, col_values_dict: dict, conn: sqlite3.Connection) -> None:
+    """
+    Write values to a row in the SQLite database.
+
+    Args:
+        id: The id of the row to write to.
+        col_values_dict: A dictionary of column names and their new values.
+        conn: The SQLite connection object.
+    """
     c = conn.cursor()
     for key, value in col_values_dict.items():
         c.execute(f"UPDATE llm_data SET {key} = '{value}' WHERE id = {id}")
@@ -58,6 +73,19 @@ def write_to_db(id: int, col_values_dict: dict, conn: sqlite3.Connection) -> Non
 def get_next_record(
     conn: sqlite3.Connection, current_id: Union[str, None] = None
 ) -> pd.DataFrame:
+    """
+    Get the next record from the SQLite database. This functions
+    first unlocks the currently selected record, then selects the next
+    record that is both unlocked and has no `decision` field, and finally
+    locks that row so that other users will not be able to access it.
+
+    Args:
+        conn: The SQLite connection object.
+        current_id: The id of the current record, if any.
+
+    Returns:
+        A pandas DataFrame containing the next record.
+    """
     c = conn.cursor()
 
     if current_id is not None:

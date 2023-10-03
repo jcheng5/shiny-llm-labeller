@@ -6,6 +6,9 @@ from queries import load_data_to_sqlite, get_next_record, write_to_db
 import sqlite3
 import os
 
+
+# Populate the database, in a real application this would be done by
+# another process.
 load_data_to_sqlite(Path(__file__).parent / "llm-data.csv")
 
 
@@ -13,6 +16,9 @@ def db_last_modified():
     return os.path.getmtime(Path(__file__).parent / "llm-data.db")
 
 
+# Reactive poll uses a cheap function (in this case checking the db timestamp)
+# to figure out whent to run the expensive function. Since this is defined outside of the
+# server function it will be shared by all users.
 @reactive.poll(db_last_modified, 0.5)
 def df() -> pd.DataFrame:
     conn = sqlite3.connect("llm-data.db")
@@ -65,9 +71,7 @@ def server(input: Inputs, output: Outputs, session: Session):
     @output
     @render.ui
     def review_ui_output():
-        return review_ui(
-            generate_prompt_dict(current_row()),
-        )
+        return review_ui(current_row())
 
     @reactive.Effect
     @reactive.event(input.skip)
@@ -113,17 +117,12 @@ def server(input: Inputs, output: Outputs, session: Session):
 app = App(app_ui, server)
 
 
-def review_ui(prompt_dict):
-    prompt = prompt_dict["prompt"]
-    options = prompt_dict["options"]
+def review_ui(prompt_df):
+    prompt = prompt_df["prompt"].values[0]
+    options = [
+        f"{opt}: {prompt_df[opt].values[0]}" for opt in ["A", "B", "C", "D", "E"]
+    ]
     return x.ui.card(
         ui.h3(prompt),
         *[ui.p(opt) for opt in options],
     )
-
-
-def generate_prompt_dict(df):
-    return {
-        "prompt": df["prompt"].values[0],
-        "options": [f"{opt}: {df[opt].values[0]}" for opt in ["A", "B", "C", "D", "E"]],
-    }
