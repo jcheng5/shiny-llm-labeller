@@ -1,3 +1,4 @@
+from typing import List
 from shiny import Inputs, Outputs, Session, App, reactive, render, ui
 import pandas as pd
 from pathlib import Path
@@ -12,7 +13,7 @@ import os
 load_data_to_sqlite(Path(__file__).parent / "llm-data.csv")
 
 
-def db_last_modified():
+def db_last_modified() -> float:
     return os.path.getmtime(Path(__file__).parent / "llm-data.db")
 
 
@@ -65,23 +66,23 @@ def server(input: Inputs, output: Outputs, session: Session):
 
     @output
     @render.data_frame
-    def data_table():
+    def data_table() -> pd.DataFrame:
         return df()
 
     @output
     @render.ui
-    def review_ui_output():
+    def review_ui_output() -> x.ui.card:
         return review_ui(current_row())
 
     @reactive.Effect
     @reactive.event(input.skip)
-    def _():
+    def skip() -> None:
         enter_item(current_row(), decision="Skip")
         get_next_item()
 
     @reactive.Effect
     @reactive.event(input.accept)
-    def _():
+    def accept() -> None:
         enter_item(
             current_row(), labels=input.labels(), notes=input.notes(), decision="Accept"
         )
@@ -89,13 +90,13 @@ def server(input: Inputs, output: Outputs, session: Session):
 
     @reactive.Effect
     @reactive.event(input.reject)
-    def _():
+    def reject() -> None:
         enter_item(
             current_row(), labels=input.labels(), notes=input.notes(), decision="Reject"
         )
         get_next_item()
 
-    def get_next_item():
+    def get_next_item() -> None:
         current_row.set(
             get_next_record(conn=conn, current_id=current_row().at[0, "id"])
         )
@@ -103,7 +104,7 @@ def server(input: Inputs, output: Outputs, session: Session):
     def enter_item(
         row_number: int,
         decision: str,
-        labels: list = [],
+        labels: List[str] = [],
         notes: str = " ",
     ) -> None:
         to_write = {
@@ -117,7 +118,7 @@ def server(input: Inputs, output: Outputs, session: Session):
 app = App(app_ui, server)
 
 
-def review_ui(prompt_df):
+def review_ui(prompt_df: pd.DataFrame) -> x.ui.card:
     prompt = prompt_df["prompt"].values[0]
     options = [
         f"{opt}: {prompt_df[opt].values[0]}" for opt in ["A", "B", "C", "D", "E"]
