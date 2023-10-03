@@ -2,15 +2,23 @@ from shiny import Inputs, Outputs, Session, App, reactive, render, ui
 import pandas as pd
 from pathlib import Path
 import shiny.experimental as x
+from queries import load_data_to_sqlite, get_next_record, write_to_db
+import sqlite3
+import os
 
-dir = Path(__file__).parent
-data_path = dir / "llm-data.csv"
+load_data_to_sqlite(Path(__file__).parent / "llm-data.csv")
 
 
-@reactive.file_reader(data_path)
-def df():
-    df = pd.read_csv("llm-data.csv")
-    return df
+def db_last_modified():
+    return os.path.getmtime(Path(__file__).parent / "llm-data.db")
+
+
+@reactive.poll(db_last_modified, 0.5)
+def df() -> pd.DataFrame:
+    conn = sqlite3.connect("llm-data.db")
+    out = pd.read_sql_query("SELECT * FROM llm_data", conn)
+    conn.close()
+    return out
 
 
 app_ui = ui.page_fluid(
@@ -27,8 +35,7 @@ app_ui = ui.page_fluid(
         ui.panel_main(
             ui.navset_tab_card(
                 ui.nav(
-                    "Tab 1",
-                    ui.row(ui.output_ui("review_ui_output")),
+                    "Review",
                     ui.row(
                         x.ui.layout_column_wrap(
                             1 / 3,
@@ -37,8 +44,9 @@ app_ui = ui.page_fluid(
                             ui.input_action_button("reject", "Reject"),
                         )
                     ),
+                    ui.row(ui.output_ui("review_ui_output")),
                 ),
-                ui.nav("Tab 2", ui.output_data_frame("data_table")),
+                ui.nav("Data", ui.output_data_frame("data_table")),
             )
         ),
     )
@@ -46,7 +54,8 @@ app_ui = ui.page_fluid(
 
 
 def server(input: Inputs, output: Outputs, session: Session):
-    current_row = reactive.Value(0)
+    conn = sqlite3.connect("llm-data.db")
+    current_row = reactive.Value(get_next_record(conn=conn, current_id=None))
 
     @output
     @render.data_frame
@@ -56,11 +65,14 @@ def server(input: Inputs, output: Outputs, session: Session):
     @output
     @render.ui
     def review_ui_output():
-        return review_ui(generate_prompt_dict(df().iloc[[current_row()]]))
+        return review_ui(
+            generate_prompt_dict(current_row()),
+        )
 
     @reactive.Effect
     @reactive.event(input.skip)
     def _():
+        enter_item(current_row(), decision="Skip")
         get_next_item()
 
     @reactive.Effect
@@ -80,21 +92,22 @@ def server(input: Inputs, output: Outputs, session: Session):
         get_next_item()
 
     def get_next_item():
-        current_row.set(current_row.get() + 1)
+        current_row.set(
+            get_next_record(conn=conn, current_id=current_row().at[0, "id"])
+        )
 
     def enter_item(
         row_number: int,
         decision: str,
         labels: list = [],
         notes: str = " ",
-        file_path: Path = data_path,
     ) -> None:
         to_write = {
             "notes": notes,
-            "decition": decision,
+            "decision": decision,
             "labels": "|".join(labels),
         }
-        write_to_csv(file_path, row_number, to_write)
+        write_to_db(current_row().at[0, "id"], to_write, conn)
 
 
 app = App(app_ui, server)
@@ -104,8 +117,8 @@ def review_ui(prompt_dict):
     prompt = prompt_dict["prompt"]
     options = prompt_dict["options"]
     return x.ui.card(
-        ui.h1(prompt),
-        *[ui.h4(opt) for opt in options],
+        ui.h3(prompt),
+        *[ui.p(opt) for opt in options],
     )
 
 
@@ -114,10 +127,3 @@ def generate_prompt_dict(df):
         "prompt": df["prompt"].values[0],
         "options": [f"{opt}: {df[opt].values[0]}" for opt in ["A", "B", "C", "D", "E"]],
     }
-
-
-def write_to_csv(csv_path: Path, row_num: int, col_values_dict: dict):
-    df = pd.read_csv(csv_path)
-    for key, value in col_values_dict.items():
-        df.at[row_num, key] = value
-    df.to_csv(csv_path, index=False)
